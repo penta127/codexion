@@ -9,9 +9,9 @@ int main(int argc, char *argv[])
     if (check == -1)
         return (1);
     input(&config, argv);
+    simulation(&config);
 
 
-    
 
     return (0);
 }
