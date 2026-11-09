@@ -38,13 +38,27 @@ typedef struct s_dongle
     long release_time;
 }t_dongle;
 
+typedef struct s_request
+{
+	int id;
+	long priority;
+}t_request;
+
+typedef struct s_heap
+{
+	t_request *data;
+	int size;
+	int capacity;
+}t_heap;
+
 //input a_1
 int error_check(int argc, char **argv);
 int number_check(char argv[], int yes_no_zero);
 void input(t_config *config, char **argv);
 
 //a2
-void simulation(t_config *config);
+int simulation(t_config *config);
+t_dongle *init_dongle(t_config *config);
 t_coder *init_coder(t_config *config);
 
 
