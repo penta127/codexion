@@ -79,18 +79,51 @@ t_heap *init_heap(t_config *config)
 int heap_push(t_heap *heap, t_request request)
 {
 	int i;
+	int parent;
+	t_request tmp;
 
-	i = 0;
+	if (heap == NULL || heap->data == NULL)
+		return (-1);
 	if (heap->capacity <= heap->size)
 		return (-1);
 	i = heap->size;
 	heap->data[i] = request;
 	heap->size++;
-
-
-
+	while(i > 0)
+	{
+		parent = (i - 1) / 2;
+		if (heap->data[parent].priority <= heap->data[i].priority)
+			break;
+		tmp = heap->data[parent];
+		heap->data[parent] = heap->data[i];
+		heap->data[i] = tmp;
+		i = parent;
+	}
+	return(0);
 }
 
+
+int heap_pop(t_heap *heap, t_request *request)
+{
+	int i;
+	int left;
+	int right;
+
+	if (heap == NULL || heap->data == NULL || request == NULL || heap->size <= 0)
+		return(-1);
+	*request = heap->data[0];
+	heap->data[0] = heap->data[heap->size - 1];
+	heap->size--;
+	i = 0;
+	while(1)
+	{
+		left = 2* i + 1;
+		right = 2 * i + 2;
+
+
+	}
+	return (0);
+}
 
 int simulation(t_config *config)
 {
