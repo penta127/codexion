@@ -108,21 +108,43 @@ int heap_pop(t_heap *heap, t_request *request)
 	int i;
 	int left;
 	int right;
+	int smallest;
+	t_request tmp;
 
 	if (heap == NULL || heap->data == NULL || request == NULL || heap->size <= 0)
-		return(-1);
+		return (-1);
 	*request = heap->data[0];
 	heap->data[0] = heap->data[heap->size - 1];
 	heap->size--;
 	i = 0;
-	while(1)
+	while (1)
 	{
-		left = 2* i + 1;
+		left = 2 * i + 1;
 		right = 2 * i + 2;
-
-
+		smallest = i;
+		if (left < heap->size
+			&& heap->data[left].priority < heap->data[smallest].priority)
+			smallest = left;
+		if (right < heap->size
+			&& heap->data[right].priority < heap->data[smallest].priority)
+			smallest = right;
+		if (smallest == i)
+			break ;
+		tmp = heap->data[i];
+		heap->data[i] = heap->data[smallest];
+		heap->data[smallest] = tmp;
+		i = smallest;
 	}
 	return (0);
+}
+
+void free_heap(t_heap *heap)
+{
+	if (heap == NULL)
+		return;
+	free(heap->data);
+	free(heap);
+	return;
 }
 
 int simulation(t_config *config)
