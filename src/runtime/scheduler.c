@@ -22,11 +22,14 @@ static bool	try_request(t_shared *s, t_request request)
 	if (now < c->s_compile_time + s->config->burnout_time
 		&& dongles_available(s, c, now))
 	{
-		grant_dongles(s, c);
+		grant_dongles(s, c, now);
 		return (true);
 	}
-	s->dongles[c->left_dongle_number].blocked = true;
-	s->dongles[c->right_dongle_number].blocked = true;
+	if (strcmp(s->config->scheduler, "fifo") == 0)
+	{
+		s->dongles[c->left_dongle_number].blocked = true;
+		s->dongles[c->right_dongle_number].blocked = true;
+	}
 	return (false);
 }
 
@@ -56,34 +59,15 @@ void	dispatch_requests(t_shared *s)
 		pthread_cond_broadcast(&s->changed);
 }
 
-static t_request	make_request(t_coder *coder)
-{
-	t_request	request;
-	t_shared	*s;
-
-	s = coder->shared;
-	request.id = coder->id;
-	request.priority = 0;
-	request.tie_breaker = 0;
-	request.order = s->next_order++;
-	if (strcmp(s->config->scheduler, "edf") == 0)
-	{
-		request.priority = coder->s_compile_time + s->config->burnout_time;
-		request.tie_breaker = -coder->id;
-	}
-	return (request);
-}
-
 bool	acquire_dongles(t_coder *coder)
 {
 	t_shared	*s;
-	t_request	request;
 	bool		acquired;
 
 	s = coder->shared;
 	pthread_mutex_lock(&s->mutex_stop);
-	request = make_request(coder);
-	if (!s->stopped && !heap_push(s->heap, request))
+	if (!s->stopped && !coder->queued && !coder->granted
+		&& !enqueue_request(coder))
 		s->stopped = true;
 	while (!s->stopped && !coder->granted)
 	{

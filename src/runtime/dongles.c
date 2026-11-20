@@ -58,7 +58,7 @@ bool	dongles_available(t_shared *s, t_coder *c, long now)
 	return (available);
 }
 
-void	grant_dongles(t_shared *s, t_coder *c)
+void	grant_dongles(t_shared *s, t_coder *c, long start)
 {
 	t_dongle	*left;
 	t_dongle	*right;
@@ -70,7 +70,8 @@ void	grant_dongles(t_shared *s, t_coder *c)
 	right->in_use = true;
 	unlock_pair(left, right);
 	c->granted = true;
-	log_compile_locked(s, c);
+	c->queued = false;
+	log_compile_locked(s, c, start);
 }
 
 void	release_dongles(t_coder *coder)

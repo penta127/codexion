@@ -16,13 +16,15 @@ bool	finish_compile(t_coder *coder)
 {
 	t_shared	*s;
 	bool		done;
+	bool		expired;
 
 	s = coder->shared;
 	pthread_mutex_lock(&s->mutex_stop);
+	expired = now_ms() - coder->s_compile_time >= s->config->burnout_time;
 	release_dongles(coder);
-	if (!s->stopped)
+	if (!s->stopped && !expired)
 		coder->count_compile++;
-	done = s->stopped
+	done = s->stopped || expired
 		|| coder->count_compile >= s->config->required_number;
 	pthread_cond_broadcast(&s->changed);
 	pthread_mutex_unlock(&s->mutex_stop);
@@ -53,7 +55,7 @@ void	*coder_routine(void *arg)
 	t_coder	*coder;
 
 	coder = arg;
-	if (!await_start(coder->shared))
+	if (!prepare_coder_start(coder))
 		return (NULL);
 	if (coder->shared->config->coders_number == 1)
 	{

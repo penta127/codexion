@@ -5,6 +5,9 @@
 
 最初から全関数を暗記する必要はありません。まず実行全体の流れを追い、その後に初期化、行動、scheduler、monitorを読む順番がおすすめです。
 
+採点表に沿った口頭回答例と実演コマンドは [defense_qa_ja.md](defense_qa_ja.md) にあります。
+C89対応はユーザー指定で今回の対象外です。現在はboolを使用しており、厳密なC89適合を主張する文書ではありません。
+
 ## 1. このプログラムで再現すること
 
 複数のcoderが円形に座り、隣同士でdongleを共有します。
@@ -77,7 +80,7 @@ compileは実際にCのコンパイラを実行する処理ではありません
 | coder threadの作成（A.3） | `src/a3/start_coders.c`：`start_coders()` |
 | monitor threadとburnout監視（A.4） | `start_coders()`, `src/runtime/monitor.c` |
 | coderの行動 | `src/runtime/coder_routine.c` |
-| FIFO／EDF | `src/runtime/scheduler.c`, `src/heap/` |
+| FIFO／EDF | `src/runtime/request.c`, `scheduler.c`, `src/heap/` |
 | dongleの取得・返却・cooldown | `src/runtime/dongles.c` |
 | ログの直列化 | `src/runtime/log.c` |
 | threadの終了待ち | `finish_join_coders()` |
@@ -96,8 +99,10 @@ main
      ├─ init_shared：共通mutex・条件変数を初期化
      ├─ prepare_data：配列・heapなどを確保し、関連づける
      ├─ start_coders：coderをN本、monitorを1本作成
-     │    └─ 各threadはawait_startで開始待ち
-     ├─ begin_simulation：開始時刻を設定し、全threadを開始可能にする
+     │    ├─ coderはprepare_coder_startで初回要求を登録して開始待ち
+     │    └─ monitorはawait_startで開始待ち
+     ├─ begin_simulation：全coderの初回登録を待つ
+     │    └─ set_start_time：共通時刻を設定し、全threadを開始可能にする
      ├─ finish_join_coders：全threadの終了を待つ
      └─ cleanup_shared：資源を破棄
 ```
@@ -119,6 +124,7 @@ joinを呼んだ順番でcoderが動くわけではありません。coderとmon
 | s_compile_time | 最後にcompileを開始した時刻 |
 | left_dongle_number / right_dongle_number | 使用するdongle配列の添字 |
 | granted | schedulerから2本を割り当て済みか |
+| queued | 自分の要求がすでにheapへ登録されているか |
 | shared | 全員共通の実行状態へのポインタ |
 
 `thread` と `shared` は別物です。`pthread_t` に共有データのポインタを入れることはできません。
@@ -131,11 +137,11 @@ joinを呼んだ順番でcoderが動くわけではありません。coderとmon
 | mutex | 使用状態と再使用可能時刻を保護する |
 | release_time | 名前に注意：実際には「次に使用可能になる時刻」 |
 | in_use | 現在compileに使用中か |
-| blocked | 今回の割当判定で、先行要求のために後続へ渡さない印 |
+| blocked | FIFOの今回の割当判定で、先行要求のために後続へ渡さない印 |
 
 `in_use` と `blocked` は異なります。
 前者は実際の使用中状態、後者はschedulerの順番を守るための一時的な予約です。
-`blocked` は各dispatchの最初にリセットされ、`mutex_stop` の下で読み書きします。
+`blocked` は各dispatchの最初にリセットされ、`mutex_stop` の下で読み書きします。EDFではこの予約を設定しません。
 
 ### 5-3. t_requestとt_heap：要求と、その順番
 
@@ -161,6 +167,7 @@ joinを呼んだ順番でcoderが動くわけではありません。coderとmon
 | 同期 | mutex_stop, mutex_log, changed |
 | 要求順 | next_order |
 | thread作成状況 | started_count, monitor, monitor_started |
+| 開始準備の人数 | prepared_count |
 
 `pending` は、dispatch中に「今は渡せなかった要求」を一時保存する配列です。
 別のthreadや、もう1つの優先度キューではありません。
@@ -192,7 +199,7 @@ mainのconfig ← shared.config
 
 ## 7. A.2：初期化で何を保証するか
 
-1. `simulation()` がsharedを `memset` でゼロにします。未作成の配列ポインタはNULL、作成済みthread数は0になります。
+1. `simulation()` がsharedを `memset` でゼロにします。この実行環境では未作成の配列ポインタはNULLとなり、作成済みthread数や準備済み人数も0になります。
 2. `init_shared()` がログmutex、状態mutex、条件変数を順に初期化します。mutexはゼロ埋めだけでは初期化できません。
 3. `init_coder()` が配列を確保し、ID・回数・左右dongleの対応などを設定します。
 4. `init_dongle()` が配列を確保し、各dongleのmutexを初期化します。
@@ -229,14 +236,25 @@ pthread_create(&shared->coders[i].thread, NULL,
 monitorには、全coderを見る必要があるためsharedを直接渡します。
 
 作成されたthreadは、mainが次のthreadを作る前に実行される可能性があります。
-そのため、各threadは最初に `await_start()` で待ちます。
+そのため、coderは `prepare_coder_start()`、monitorは `await_start()` で開始条件を待ちます。
 
-全threadの作成後、`begin_simulation()` が次の処理をします。
+coder側の準備は次の流れです。
+
+1. `enqueue_request()` で最初の要求を登録し、queuedをtrueにする。
+2. `prepared_count` を増やし、mainへ準備完了を通知する。
+3. `await_start()` でreadyまたはstoppedを待つ。
+
+全threadの作成後、main側の `begin_simulation()` は全coderの初回登録がそろうまで条件変数で待ちます。
+そろったら `set_start_time()` で次を行います。
 
 1. 現在時刻を `start_time` に保存する。
 2. 全coderの `s_compile_time` に同じ時刻を設定する。
-3. `ready = true` にする。
-4. `pthread_cond_broadcast()` で開始待ちのthreadを起こす。
+3. EDFの場合、すでに登録した全要求のpriorityへstart_timeを加える。
+4. `ready = true` にし、呼び出し元がbroadcastで開始待ちのthreadを起こす。
+
+初回要求の登録時はs_compile_timeが0なので、EDFのpriorityはburnout_timeです。
+全priorityへ同じ開始時刻を加えることで、比較順を変えずに絶対deadlineへ直せます。
+全要求がそろってから割り当てるので、初回の同deadlineで高IDを優先する規則も反映できます。
 
 これにより、まだ1度もcompileしていないcoderも「simulation開始時刻」を基準に監視できます。
 ただし、全threadが同じ瞬間にCPUで動き始める保証ではありません。
@@ -281,8 +299,11 @@ mutex_stopをunlock → usleep(500) → mutex_stopをlock
 
 ## 10. FIFO／EDFは「誰から判定するか」を決める
 
-[scheduler.c](../src/runtime/scheduler.c) の `make_request()` が要求を作り、
+[request.c](../src/runtime/request.c) の `enqueue_request()` が要求を作ってheapへ入れ、
 [heap.c](../src/heap/heap.c) の `request_before()` が順序を比較します。
+
+初回要求は開始前に登録済みです。`acquire_dongles()` はqueuedを確認し、同じ要求を二重登録しません。
+割当時はqueuedをfalse、grantedをtrueにします。返却後の次の周では、新しい要求を登録できます。
 
 ### 10-1. FIFO
 
@@ -332,33 +353,41 @@ min-heapでは、親の要求が子より先に来るという関係を保ちま
 1. 全dongleの `blocked` をfalseにする。
 2. heapから優先順位順に要求をpopする。
 3. 期限内で、2本とも未使用・cooldown終了・blockedでなければ割り当てる。
-4. 渡せなかった要求はpendingへ置き、その要求の2本をblockedにする。
+4. 渡せなかった要求はpendingへ置く。FIFOの場合だけ、その要求の2本をblockedにする。
 5. 全要求を判定したら、pendingに残ったものをheapへ戻す。
 
 先頭をすぐheapへ戻すと、同じ要求を何度もpopして先へ進めなくなります。
 pendingは、それを防いで「1回のdispatchで各要求を1回ずつ判定する」ためにあります。
 
-### 10-5. なぜblockedが必要か
+### 10-5. FIFOでblockedを使い、EDFでは予約しない理由
 
 coder1が先にdongle1・2を要求したものの、dongle1が使用中で取れないとします。
 後からcoder2がdongle2・3を要求した場合、空いているdongle2を先に取らせると、共有dongleの順番を追い越します。
 
-そこで、coder1にまだ渡せなくてもdongle1・2をblockedにし、後続のcoder2も待たせます。
+FIFOでは、coder1にまだ渡せなくてもdongle1・2をblockedにし、後続のcoder2も待たせます。
 先行要求と関係のない組なら使えます。ただし、予約が連鎖して後続も待つ場合があります。
 
 これはmutexを握り続ける予約ではありません。使用中のcoderは通常どおり返却できます。
-毎回のdispatchで優先順位から予約を作り直すので、EDFでより早いdeadlineの要求が来れば、その順序が反映されます。
+毎回のdispatchで到着順から予約を作り直します。
 
-この方式は追い越しを防ぐ一方、空いているdongleが一時的に使われない場合があります。
-EDFという名前だけで、あらゆる実現可能な入力に対する無burnoutを数学的に保証したものではありません。
+このFIFO方式は追い越しを防ぐ一方、空いているdongleが一時的に使われない場合があります。
+同じ予約をEDFにも使うと、予約が連鎖して、並行に実行できる組まで待たされることがあります。
+
+そこでEDFは予約を作らず、deadline順に要求を見て、2本とも使用可能な要求へ割り当てます。
+期限が早い要求の片方が使用中なら、その要求はpendingへ残し、使用可能なほかの組を調べます。
+すでにcompile中のdongleを取り上げるわけではありません。
+
+これは「現在割当可能な要求の中でdeadline優先」という非プリエンプティブな方式です。
+不要な予約による待機を避ける改善ですが、あらゆる実現可能な入力に対する無burnoutを数学的に証明したものではありません。
+課題の強い保証と、確認済みの有限個のテスト結果は区別して説明します。
 
 ## 11. dongle取得とcompile開始を追う
 
 [dongles.c](../src/runtime/dongles.c) の関数は、呼び出し元が `mutex_stop` をlockしていることを前提にしています。
 
-1. `dongles_available()` が2本の使用状態と再使用可能時刻を確認する。
+1. schedulerが現在時刻nowを取得し、旧deadlineより前か、2本を使えるか確認する。
 2. `grant_dongles()` が2本を使用中にし、coderの `granted = true` にする。
-3. `log_compile_locked()` がcompile開始時刻を更新し、取得ログ2行とcompileログを出す。
+3. `log_compile_locked()` が検査に使ったnowを開始時刻として保存し、取得ログ2行とcompileログを出す。
 4. 要求元のcoder threadが `acquire_dongles()` から戻り、compile終了時刻まで待つ。
 
 **割当判定やcompile開始ログは、要求元以外のcoder threadが実行する場合もあります。**
@@ -366,6 +395,7 @@ dispatchは共通の要求一覧を見るためです。ログのIDは、処理�
 
 現在の設計は「schedulerが割当を確定した時点」をcompile開始として扱います。
 要求元のthreadがCPUへ戻ってきた時点から、さらにcompile_timeを丸ごと待つ方式ではありません。
+期限検査後にnowを取り直さず、検査した時刻を引数で渡します。検査と記録の時刻をずらして、旧期限の超過を隠すことを避けています。
 
 2本の確認から使用中への更新までは共通状態mutexで直列化されるため、途中に別threadが割り込んで同じdongleを割り当てることを防いでいます。
 
@@ -399,16 +429,19 @@ compile終了予定時刻ではなく、実際の返却時刻が基準です。
 
 [coder_routine.c](../src/runtime/coder_routine.c) の `work_cycle()` を追います。
 
-1. `acquire_dongles()`：要求を登録し、割り当てられるまで待つ。
+1. `acquire_dongles()`：未登録なら要求を登録し、割り当てられるまで待つ。
 2. `wait_until()`：compile開始時刻＋compile_timeまで待つ。
-3. `finish_compile()`：2本を返却し、停止していなければ完了回数を増やす。
-4. 自分が必要回数へ達した場合、または停止済みなら、そのcoderは終了する。
+3. `finish_compile()`：旧deadlineを確認し、2本を返却する。停止済みでも期限切れでもなければ完了回数を増やす。
+4. 自分が必要回数へ達した場合、期限切れの場合、または停止済みなら、そのcoderは終了する。
 5. debugログを出し、debug_time待つ。
 6. refactorログを出し、refactor_time待つ。
 7. 次の周へ進む。
 
 回数はcompile開始時ではなく、完了時に加算します。
 burnoutでcompile中に停止した場合も、まず使用中のdongleを返しますが、その中断されたcompileは回数に加えません。
+monitorがまだ検出していなくても、完了処理時に旧期限へ達していれば加算しません。
+未達回数のままcoderを終了させることで、monitorが期限切れを検出してburnoutログを出します。
+これにより、最後のcompileの期限切れが「回数達成済みなので監視対象外」として隠れることを防ぎます。
 
 今回の実装では、自分の必要回数に達したcoderは退場します。
 そのため、最後のcompileの後にdebug・refactorログがない場合があります。
@@ -485,20 +518,28 @@ heapは内部配列と本体の2つを確保しているため、`free_heap()` �
 make
 ./codexion 4 1000 100 100 100 3 60 edf
 make test
+make test-failures
 ```
 
 | 検証 | 見ていること |
 |---|---|
 | make | 警告をエラーにしたビルド、実行ファイル名 |
-| tests/test_scheduler.c | FIFO追い越し防止、独立した組の割当、EDFの高ID優先、deadline最優先 |
-| tests/test_codexion.py | ログ形式、遷移、回数、行動時間、取得間隔、cooldown、burnout、入力エラー |
-| 同Python内のdefense_cases | 200人以下・時間値60ms以上の12ケース |
+| tests/test_scheduler.c | FIFO追い越し防止、独立した組の割当、EDFの高ID優先、deadline最優先、使用可能ペアの割当 |
+| tests/test_deadlines.c | now_msをテスト用wrapperで固定し、旧期限ちょうど・超過・直前の完了処理、検査時刻の継承を確認 |
+| tests/test_codexion.py | ログ形式、遷移、回数、行動時間、取得間隔、cooldown、burnout、入力エラー、初回EDF高ID優先、最後のcompile終了まで待つこと |
+| 同Python内のdefense_cases | 200人以下・時間値60ms以上の12ケースと、余裕の小さいEDF条件を反復する4ケースの計16ケース |
+| make test-failures | malloc・mutex・条件変数・thread作成を計17か所で失敗させ、終了コードとValgrindのリーク・エラーを確認 |
 | Norminette | ソースの書式・関数長など |
 | Valgrind Memcheck | 検査ケースの不正メモリアクセス・リーク |
 | Valgrind Helgrind | 検査ケースのthread間競合・lock順序 |
 
-以前の初期化失敗テストは、一時的な検証用wrapperでmallocやpthread_createなどを失敗させて実施しました。
-そのwrapperはリポジトリのmake testには含まれていません。
+`make test` の通常の時刻付き動作テストは、人数200以下・時間値60ms以上です。
+短時間や0の境界値は `python3 -B tests/test_codexion.py --extended` を明示した場合だけ追加で動きます。これらは採点条件とは分けた任意の検証です。
+
+初期化失敗テストは [fault_injection.c](../tests/fault_injection.c) と [test_failures.py](../tests/test_failures.py) に保存してあり、`make test-failures` で再実行できます。
+wrapperは検証用binaryだけにリンクされ、通常のcodexionには入りません。
+Valgrindがない環境では終了処理の実行確認だけを行い、メモリ検査はSKIPと表示します。SKIPをリークなしの確認済みとは扱いません。
+また、最終compile時間の検査は、実行全体の経過時間と最終compile開始ログを比較します。
 
 テストが通ることと、あらゆる入力・負荷で正しいことは別です。
 特にタイミングの検査はログを基にしており、内部資源の状態を直接すべて観測しているわけではありません。
@@ -511,7 +552,7 @@ make test
 3. `simulation.c` と `shared.c`：作成順と破棄順を紙に書く。
 4. `start_coders.c`：threadへ何を渡すか、なぜ開始待ちが必要か説明する。
 5. `coder_routine.c`：通常の1周と、途中停止の1周を追う。
-6. `scheduler.c` と `heap.c`：架空の要求を3件並べて比較する。
+6. `request.c`、`scheduler.c` と `heap.c`：架空の要求を3件並べて比較する。
 7. `dongles.c`：使用中と予約、返却時刻とcooldownを区別する。
 8. `monitor.c` と `log.c`：burnout判定から最後のログまで追う。
 
@@ -533,5 +574,9 @@ make test
 12. 最後のcompile後にdebugログが出ない場合がある理由。
 13. wait_changeで、sleep前に状態mutexを解放する理由。
 14. ログmutexだけでは停止後のログを防げない理由。
+15. 初回要求を全員分そろえる理由と、queuedが防ぐ二重登録。
+16. FIFOだけが予約を作り、EDFは使用可能な組を調べる理由。
+17. 最後のcompileの期限切れを、完了回数へ加えない理由。
 
+回答例と追加質問は [defense_qa_ja.md](defense_qa_ja.md) にまとめています。
 説明に詰まったところを、その都度コードと一緒に確認する使い方を想定しています。

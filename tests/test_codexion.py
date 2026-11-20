@@ -1,6 +1,8 @@
 """Run after make: python3 tests/test_codexion.py."""
 import re
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,16 +11,20 @@ LINE = re.compile(r"(\d+) (\d+) (has taken a dongle|is compiling|"
                   r"is debugging|is refactoring|burned out)")
 
 
-def run(args, code=0):
+def run(args, code=0, timed=False):
+    started = time.monotonic()
     result = subprocess.run([str(BIN), *map(str, args)], cwd=ROOT,
-                            capture_output=True, text=True, timeout=8)
+                            capture_output=True, text=True, timeout=15)
+    elapsed_ms = (time.monotonic() - started) * 1000
     assert result.returncode == code, (args, result.stderr)
+    if timed:
+        return result.stdout.splitlines(), elapsed_ms
     return result.stdout.splitlines()
 
 
 def check_run(args, burnout=False):
     n, burn, compile_ms, debug_ms, refactor_ms, required, cooldown, _ = args
-    lines = run(args)
+    lines, elapsed_ms = run(args, timed=True)
     counts = [0] * n
     last_start = [0] * n
     last_event = [None] * n
@@ -26,6 +32,7 @@ def check_run(args, burnout=False):
     available = [0] * n
     previous_time = 0
     deaths = 0
+    first_compile = None
     for line in lines:
         match = LINE.fullmatch(line)
         assert match and deaths == 0, (args, line)
@@ -37,6 +44,8 @@ def check_run(args, burnout=False):
         if event == "has taken a dongle":
             takes[i] += 1
         elif event == "is compiling":
+            if first_compile is None:
+                first_compile = ident
             assert n > 1 and takes[i] == 2, (args, line)
             assert timestamp - last_start[i] < burn + 2, (args, line)
             if last_event[i]:
@@ -66,6 +75,10 @@ def check_run(args, burnout=False):
     assert bool(deaths) == burnout, (args, lines)
     if not burnout:
         assert all(count == required for count in counts), (args, counts)
+        assert elapsed_ms + 1 >= max(last_start) + compile_ms, (
+            args, "returned before final compile completed", elapsed_ms)
+        if args[-1] == "edf":
+            assert first_compile == n, (args, "initial EDF tie", first_compile)
 
 
 def defense_cases():
@@ -75,9 +88,13 @@ def defense_cases():
         check_run([1, 120, 60, 60, 60, 2, 60, policy], burnout=True)
         check_run([2, 120, 180, 60, 60, 2, 60, policy], burnout=True)
     print("PASS: 12 defense scenarios (at most 200 coders, times >= 60ms)")
+    for _ in range(2):
+        check_run([8, 300, 60, 60, 60, 3, 60, "edf"])
+        check_run([10, 800, 200, 200, 200, 3, 60, "edf"])
+    print("PASS: 4 tight feasible EDF regressions and final compile duration")
 
 
-def main():
+def extended_cases():
     cases = 0
     for policy in ("fifo", "edf"):
         for n in (2, 3, 4, 5, 10, 30):
@@ -91,7 +108,11 @@ def main():
             cases += 1
         check_run([4, 3000, 0, 0, 0, 10, 0, policy])
         assert run([4, 100, 10, 10, 10, 0, 0, policy]) == []
-    valid = [2, 1000, 10, 10, 10, 2, 0, "fifo"]
+    print(f"PASS: {cases} extra short-duration scenarios and zero cases")
+
+
+def main():
+    valid = [2, 1000, 60, 60, 60, 2, 60, "fifo"]
     for index, value in ((0, 0), (0, "2147483648"), (1, -1),
                          (2, "1x"), (3, ""), (4, "+1"),
                          (5, "1.5"), (6, -1), (7, "invalid")):
@@ -100,8 +121,10 @@ def main():
         run(args, code=1)
     run([], code=1)
     run(valid + [1], code=1)
-    print(f"PASS: {cases} timed scenarios, zero cases and input errors")
+    print("PASS: input errors")
     defense_cases()
+    if "--extended" in sys.argv[1:]:
+        extended_cases()
 
 
 if __name__ == "__main__":

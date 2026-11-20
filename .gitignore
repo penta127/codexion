@@ -1,3 +1,5 @@
 *.o
 /codexion
 /tests/test_scheduler
+/tests/test_deadlines
+/tests/test_failures_probe

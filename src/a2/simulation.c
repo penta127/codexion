@@ -33,21 +33,36 @@ static bool	prepare_data(t_shared *shared, t_config *config)
 	return (true);
 }
 
-static void	begin_simulation(t_shared *shared)
+static void	set_start_time(t_shared *shared)
 {
 	int	i;
 
-	pthread_mutex_lock(&shared->mutex_stop);
 	shared->start_time = now_ms();
 	i = 0;
 	while (i < shared->config->coders_number)
 	{
 		shared->coders[i].s_compile_time = shared->start_time;
+		if (strcmp(shared->config->scheduler, "edf") == 0)
+			shared->heap->data[i].priority += shared->start_time;
 		i++;
 	}
 	shared->ready = true;
+}
+
+static bool	begin_simulation(t_shared *shared)
+{
+	bool	running;
+
+	pthread_mutex_lock(&shared->mutex_stop);
+	while (!shared->stopped
+		&& shared->prepared_count < shared->config->coders_number)
+		pthread_cond_wait(&shared->changed, &shared->mutex_stop);
+	if (!shared->stopped)
+		set_start_time(shared);
+	running = !shared->stopped;
 	pthread_cond_broadcast(&shared->changed);
 	pthread_mutex_unlock(&shared->mutex_stop);
+	return (running);
 }
 
 bool	simulation(t_config *config)
@@ -68,7 +83,7 @@ bool	simulation(t_config *config)
 	{
 		success = start_coders(&shared);
 		if (success)
-			begin_simulation(&shared);
+			success = begin_simulation(&shared);
 		if (!finish_join_coders(&shared))
 			success = false;
 	}

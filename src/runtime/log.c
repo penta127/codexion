@@ -19,12 +19,12 @@ void	log_locked(t_shared *shared, int id, const char *message)
 	pthread_mutex_unlock(&shared->mutex_log);
 }
 
-void	log_compile_locked(t_shared *shared, t_coder *coder)
+void	log_compile_locked(t_shared *shared, t_coder *coder, long start)
 {
 	long	timestamp;
 
 	pthread_mutex_lock(&shared->mutex_log);
-	coder->s_compile_time = now_ms();
+	coder->s_compile_time = start;
 	timestamp = coder->s_compile_time - shared->start_time;
 	printf("%ld %d has taken a dongle\n%ld %d has taken a dongle\n"
 		"%ld %d is compiling\n", timestamp, coder->id,

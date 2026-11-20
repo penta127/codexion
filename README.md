@@ -12,17 +12,24 @@ or earliest-deadline-first (EDF).
 The original Japanese task notes are preserved in [docs/subject_ja.md](docs/subject_ja.md).
 
 For a Japanese walkthrough connecting the requirements to the actual code,
-see [the implementation guide](docs/implementation_ja.md).
+see [the implementation guide](docs/implementation_ja.md). Evaluation answers,
+demonstration commands and follow-up questions are in
+[the Japanese defense guide](docs/defense_qa_ja.md).
+
+The [requirements audit](docs/audit_ja.md) records fixes, validation evidence
+and the remaining interpretation and guarantee limits.
 
 ## Instructions
 
 Build with `make`. The executable is compiled with
 `-Wall -Wextra -Werror -pthread`.
+Strict C89 compatibility is outside the current agreed scope: this version uses
+`stdbool.h` and does not claim strict C89 compliance.
 
 ```sh
 ./codexion number_of_coders time_to_burnout time_to_compile time_to_debug \
 time_to_refactor number_of_compiles_required dongle_cooldown scheduler
-./codexion 5 1000 100 100 100 3 20 edf
+./codexion 5 1000 100 100 100 3 60 edf
 ```
 
 All eight arguments are mandatory. Numeric arguments must contain digits only
@@ -49,23 +56,28 @@ With one coder, the sole dongle is logged once; compilation is impossible.
 - **Scheduling / starvation:** pending requests are popped from a min-heap in
   priority order. FIFO uses an increasing request sequence. EDF uses
   `last_compile_start + time_to_burnout`, then higher coder ID on equal deadlines,
-  then arrival sequence. During each dispatch pass, an ungrantable request marks
-  both of its dongles as blocked for lower-priority requests. This is a logical
-  reservation, not held mutexes: current owners can still release their dongles.
-  Requests with disjoint unblocked pairs can proceed. Reservations are reset
-  and rebuilt in priority order on every pass, so an earlier EDF deadline can
-  supersede an older request. Strict per-dongle ordering can leave a free dongle
-  idle while its higher-priority requester waits for its other dongle.
-  Infeasible timings still result in burnout.
+  then arrival sequence. FIFO logically reserves both dongles of an ungrantable
+  request against later requests during that dispatch pass. These reservations
+  do not hold mutexes and are rebuilt on the next pass. EDF instead scans
+  requests in deadline order and grants available pairs without reserving a
+  free dongle for a request waiting on another occupied dongle. This avoids
+  chains of idle reservations in EDF. Neither finite regression tests nor this
+  priority rule alone prove the strong requirement of no burnout for every
+  mathematically feasible input. That universal guarantee remains unproven.
 - **Cooldown:** releasing a pair sets each dongle's next-available timestamp to
   the release time plus cooldown. It is checked before every grant.
 - **Burnout:** the dedicated monitor polls shared timestamps every 500 microseconds.
   Tests check the requested 10 ms logging tolerance; OS scheduling and blocked
-  output can affect actual timing.
+  output can affect actual timing. Compile completion checks the old burnout
+  deadline before increasing the count, so a delayed monitor cannot turn an
+  already expired final compile into successful retirement. The monitor remains
+  the only thread that emits burnout logs.
 - **Log serialization:** state updates precede logging under a shared state lock,
   then a dedicated log lock. Burnout sets the stop state under that same state
   lock, preventing subsequent normal messages.
-- **Partial startup:** all threads wait behind a start gate. If any creation
+- **Partial startup:** all coders enqueue their first request behind a start
+  gate. The main thread waits for every request before setting the common start
+  time, so initial equal-deadline EDF decisions include all coders. If creation
   fails, created threads are awakened, stopped and joined before cleanup.
 - **Allocation / initialization failures:** only initialized mutexes are
   destroyed; all owned allocations are freed, including heap storage.
@@ -88,13 +100,19 @@ the predicate again. Workers can therefore stop during compilation, debugging,
 refactoring and resource waits. Compile ownership is released even after stop.
 All threads are joined before mutexes, arrays and queue storage are destroyed.
 
+`prepared_count` counts coders that submitted their first request. `queued`
+prevents a coder from registering the same request twice. Initial EDF deadlines
+are shifted by the same start-time offset without changing their heap order.
+The scheduler passes the timestamp used in its deadline check through to compile
+logging rather than replacing it with a later timestamp.
+
 ## Code reading order
 
 1. `main.c`, `src/a1/`: argument validation and config.
 2. `src/a2/`: coder/dongle/shared initialization and ownership cleanup.
 3. `src/a3/start_coders.c`: create, common start gate, failure stop, join.
 4. `src/runtime/coder_routine.c`: compile, debug, refactor cycle.
-5. `src/runtime/scheduler.c`, `src/heap/`: requests and priorities.
+5. `src/runtime/request.c`, `scheduler.c`, `src/heap/`: requests and priorities.
 6. `src/runtime/dongles.c`: pair acquisition, release and cooldown.
 7. `src/runtime/monitor.c`: burnout and all-completed termination.
 8. `src/runtime/time.c`, `log.c`: elapsed time, interruptible waits and logging.
@@ -104,18 +122,30 @@ All threads are joined before mutexes, arrays and queue storage are destroyed.
 ```sh
 make
 make test
-python3 tests/test_codexion.py
+make test-failures
 norminette codexion.h main.c basic_code src
-valgrind --leak-check=full --error-exitcode=99 ./codexion 5 3000 5 3 3 3 2 edf
-valgrind --tool=helgrind --error-exitcode=99 ./codexion 4 3000 5 3 3 2 1 fifo
+valgrind --leak-check=full --error-exitcode=99 ./codexion 5 3000 60 60 60 2 60 edf
+valgrind --tool=helgrind --error-exitcode=99 ./codexion 4 3000 60 60 60 2 60 fifo
 ```
 
-The scheduler regression test checks FIFO non-overtaking, independent pairs,
-EDF higher-ID tie-breaking despite later arrival, and deadline precedence.
-The Python tests validate log format, per-coder ordering, compile counts, minimum
-action durations, pair exclusion, cooldown, zero values, invalid input, one-coder
-burnout and burnout latency. Initialization and thread-creation failure paths
-were also checked using temporary linker fault-injection wrappers.
+`make test` runs scheduler and deterministic deadline-boundary tests plus the
+Python integration suite. The default timed integration tests use at most 200
+coders and time values of at least 60 ms: 12 defense scenarios and four repeated
+tight EDF regressions. They check initial EDF higher-ID priority, final compile
+duration, log format, state transitions, action durations, pair exclusion,
+cooldown, invalid input and burnout latency. `tests/test_deadlines.c` replaces
+`now_ms` through a test-only linker wrapper to check exact deadline boundaries.
+
+`make test-failures` injects 17 allocation, mutex, condition-variable and
+thread-creation failures and checks cleanup with Valgrind. Its wrappers are test
+code and are not linked into the production executable.
+If Valgrind is unavailable, the runner still checks failure handling and reports
+memory validation as skipped rather than claiming it passed.
+
+Optional short-duration and zero-value tests are available with
+`python3 -B tests/test_codexion.py --extended`. These additional cases are not
+the grading-time timing conditions. Passing these tests is evidence for the
+tested executions, not a proof for every possible input or thread schedule.
 
 ## Resources
 

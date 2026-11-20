@@ -7,7 +7,8 @@ SRC = main.c basic_code/ft_atoi.c \
 	src/a2/coder.c src/a2/shared.c src/a2/simulation.c \
 	src/a3/start_coders.c src/heap/heap.c src/heap/pop.c \
 	src/runtime/time.c src/runtime/log.c src/runtime/dongles.c \
-	src/runtime/scheduler.c src/runtime/coder_routine.c src/runtime/monitor.c
+	src/runtime/scheduler.c src/runtime/request.c \
+	src/runtime/coder_routine.c src/runtime/monitor.c
 OBJ = $(SRC:.c=.o)
 
 all: $(NAME)
@@ -19,7 +20,8 @@ $(NAME): $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 clean:
-	$(RM) $(OBJ) tests/test_scheduler
+	$(RM) $(OBJ) tests/test_scheduler tests/test_deadlines \
+		tests/test_failures_probe
 
 fclean: clean
 	$(RM) $(NAME)
@@ -31,6 +33,16 @@ test: $(NAME)
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_scheduler.c \
 		$(filter-out main.o,$(OBJ)) -o tests/test_scheduler
 	./tests/test_scheduler
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_deadlines.c \
+		$(filter-out main.o,$(OBJ)) -Wl,--wrap=now_ms -o tests/test_deadlines
+	./tests/test_deadlines
 	python3 -B tests/test_codexion.py
 
-.PHONY: all clean fclean re test
+test-failures: $(NAME)
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/fault_injection.c $(OBJ) \
+		-Wl,--wrap=malloc -Wl,--wrap=pthread_mutex_init \
+		-Wl,--wrap=pthread_cond_init -Wl,--wrap=pthread_create \
+		-o tests/test_failures_probe
+	python3 -B tests/test_failures.py
+
+.PHONY: all clean fclean re test test-failures

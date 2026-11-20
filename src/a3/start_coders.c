@@ -71,3 +71,20 @@ bool	await_start(t_shared *shared)
 	pthread_mutex_unlock(&shared->mutex_stop);
 	return (running);
 }
+
+bool	prepare_coder_start(t_coder *coder)
+{
+	t_shared	*s;
+
+	s = coder->shared;
+	pthread_mutex_lock(&s->mutex_stop);
+	if (!s->stopped)
+	{
+		if (!enqueue_request(coder))
+			s->stopped = true;
+		s->prepared_count++;
+	}
+	pthread_cond_broadcast(&s->changed);
+	pthread_mutex_unlock(&s->mutex_stop);
+	return (await_start(s));
+}
