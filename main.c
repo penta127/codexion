@@ -1,18 +1,32 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   main.c                                             :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: koito <koito@student.42tokyo.jp>           #+#  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/11/20 00:00:00 by koito             #+#    #+#             */
+/*   Updated: 2026/11/20 00:00:00 by koito            ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "codexion.h"
 
-int main(int argc, char *argv[])
+int	main(int argc, char **argv)
 {
-    bool valid_input;
-    t_config config;
+	t_config	config;
 
-    valid_input = error_check(argc, argv);
-    if (!valid_input)
-        return (1);
-    input(&config, argv);
-    if (!simulation(&config))
-        return (1);
-
-
-
-    return (0);
+	if (!error_check(argc, argv))
+	{
+		fprintf(stderr, "Usage: ./codexion coders burnout compile debug "
+			"refactor required cooldown fifo|edf\n");
+		return (1);
+	}
+	input(&config, argv);
+	if (!simulation(&config))
+	{
+		fprintf(stderr, "Error: simulation initialization or thread failure\n");
+		return (1);
+	}
+	return (0);
 }

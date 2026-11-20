@@ -1,47 +1,73 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   start_coders.c                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: koito <koito@student.42tokyo.jp>           #+#  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/11/20 00:00:00 by koito             #+#    #+#             */
+/*   Updated: 2026/11/20 00:00:00 by koito            ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "codexion.h"
 
-void *coder_routine(void *arg)
+static bool	start_failed(t_shared *shared)
 {
-	t_coder *coder;
-	coder = arg;
-	return (NULL);
+	pthread_mutex_lock(&shared->mutex_stop);
+	shared->stopped = true;
+	pthread_cond_broadcast(&shared->changed);
+	pthread_mutex_unlock(&shared->mutex_stop);
+	return (false);
 }
 
-bool finish_join_coders(t_coder *coders, t_config *config)
+bool	start_coders(t_shared *shared)
 {
-	int i;
+	int	i;
 
 	i = 0;
-	while(i < config->coders_number)
+	while (i < shared->config->coders_number)
 	{
-		if (pthread_join(coders[i].thread, NULL) != 0)
-			return (false);
+		if (pthread_create(&shared->coders[i].thread, NULL,
+				coder_routine, &shared->coders[i]) != 0)
+			return (start_failed(shared));
+		shared->started_count++;
 		i++;
 	}
+	if (pthread_create(&shared->monitor, NULL,
+			monitor_routine, shared) != 0)
+		return (start_failed(shared));
+	shared->monitor_started = true;
 	return (true);
 }
 
-
-bool start_coders(t_coder *coders, t_config *config)
+bool	finish_join_coders(t_shared *shared)
 {
-	int i;
-	int check;
+	int		i;
+	bool	success;
 
+	success = true;
 	i = 0;
-	while(i < config->coders_number)
+	while (i < shared->started_count)
 	{
-		check = pthread_create(&coders[i].thread, NULL, coder_routine, &coders[i]);
-		if (check != 0)
-		{
-			i = i - 1;
-			while(0 <= i)
-			{
-				pthread_join(coders[i].thread, NULL);
-				i--;
-			}
-			return (false);
-		}
+		if (pthread_join(shared->coders[i].thread, NULL) != 0)
+			success = false;
 		i++;
 	}
-	return (true);
+	if (shared->monitor_started
+		&& pthread_join(shared->monitor, NULL) != 0)
+		success = false;
+	return (success);
+}
+
+bool	await_start(t_shared *shared)
+{
+	bool	running;
+
+	pthread_mutex_lock(&shared->mutex_stop);
+	while (!shared->ready && !shared->stopped)
+		pthread_cond_wait(&shared->changed, &shared->mutex_stop);
+	running = !shared->stopped;
+	pthread_mutex_unlock(&shared->mutex_stop);
+	return (running);
 }

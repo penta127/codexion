@@ -1,181 +1,71 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   coder.c                                            :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: koito <koito@student.42tokyo.jp>           #+#  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/11/20 00:00:00 by koito             #+#    #+#             */
+/*   Updated: 2026/11/20 00:00:00 by koito            ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "codexion.h"
 
-t_coder *init_coder(t_config *config)
+t_coder	*init_coder(t_config *config)
 {
-	t_coder *coders;
-	int i;
+	t_coder	*coders;
+	int		i;
 
 	coders = malloc(sizeof(t_coder) * config->coders_number);
-	if(coders == NULL)
+	if (coders == NULL)
 		return (NULL);
+	memset(coders, 0, sizeof(t_coder) * config->coders_number);
 	i = 0;
-	while(i < config->coders_number)
+	while (i < config->coders_number)
 	{
 		coders[i].id = i + 1;
-		coders[i].count_compile = 0;
 		coders[i].left_dongle_number = i;
-		if (i != config->coders_number - 1)
-			coders[i].right_dongle_number = i + 1;
-		else
-			coders[i].right_dongle_number = 0;
+		coders[i].right_dongle_number = (i + 1) % config->coders_number;
 		i++;
 	}
 	return (coders);
 }
 
-
-t_dongle *init_dongle(t_config *config)
+void	destroy_dongles(t_dongle *dongles, int count)
 {
-    t_dongle *dongle;
-    int check;
-    int i;
+	int	i;
 
-    dongle = malloc(sizeof(t_dongle) * config->coders_number);
-    if (dongle == NULL)
-        return NULL;
-    i = 0;
-    while (i < config->coders_number)
-    {
-        dongle[i].id = i + 1;
-        dongle[i].release_time = -1;
-        check = pthread_mutex_init(&dongle[i].mutex, NULL);
-        if (check != 0)
-        {
-            i--;
-            while(0 <= i)
-            {
-                pthread_mutex_destroy(&dongle[i].mutex);
-                i--;
-            }
-            free(dongle);
-            return(NULL);
-        }
-        i++;
-    }
-    return (dongle);
-}
-
-
-t_heap *init_heap(t_config *config)
-{
-	t_heap *heap;
-
-	heap = malloc(sizeof(t_heap));
-	if (heap == NULL)
-		return (NULL);
-	heap->data = malloc(sizeof(t_request) * config->coders_number);
-	if (heap->data == NULL)
-	{
-		free(heap->data);
-		free(heap);
-		return(NULL);
-	}
-	heap->size = 0;
-	heap->capacity = config->coders_number;
-	return (heap);
-}
-
-
-bool heap_push(t_heap *heap, t_request request)
-{
-	int i;
-	int parent;
-	t_request tmp;
-
-	if (heap == NULL || heap->data == NULL)
-		return (false);
-	if (heap->capacity <= heap->size)
-		return (false);
-	i = heap->size;
-	heap->data[i] = request;
-	heap->size++;
-	while(i > 0)
-	{
-		parent = (i - 1) / 2;
-		if (heap->data[parent].priority <= heap->data[i].priority)
-			break;
-		tmp = heap->data[parent];
-		heap->data[parent] = heap->data[i];
-		heap->data[i] = tmp;
-		i = parent;
-	}
-	return (true);
-}
-
-
-bool heap_pop(t_heap *heap, t_request *request)
-{
-	int i;
-	int left;
-	int right;
-	int smallest;
-	t_request tmp;
-
-	if (heap == NULL || heap->data == NULL || request == NULL || heap->size <= 0)
-		return (false);
-	*request = heap->data[0];
-	heap->data[0] = heap->data[heap->size - 1];
-	heap->size--;
 	i = 0;
-	while (1)
+	if (!dongles)
+		return ;
+	while (i < count)
 	{
-		left = 2 * i + 1;
-		right = 2 * i + 2;
-		smallest = i;
-		if (left < heap->size && heap->data[left].priority < heap->data[smallest].priority)
-			smallest = left;
-		if (right < heap->size && heap->data[right].priority < heap->data[smallest].priority)
-			smallest = right;
-		if (smallest == i)
-			break ;
-		tmp = heap->data[i];
-		heap->data[i] = heap->data[smallest];
-		heap->data[smallest] = tmp;
-		i = smallest;
+		pthread_mutex_destroy(&dongles[i].mutex);
+		i++;
 	}
-	return (true);
+	free(dongles);
 }
 
-void free_heap(t_heap *heap)
+t_dongle	*init_dongle(t_config *config)
 {
-	if (heap == NULL)
-		return;
-	free(heap->data);
-	free(heap);
-	return;
-}
+	t_dongle	*dongles;
+	int			i;
 
-bool simulation(t_config *config)
-{
-	t_coder *coders;
-	t_dongle *dongle;
-	t_heap *heap;
-	int i;
-
-    coders = init_coder(config);
-    if (coders == NULL)
-        return (false);
-    dongle = init_dongle(config);
-    if (dongle == NULL)
-    {
-        free(coders);
-        return (false);
-    }
-	heap = init_heap(config);
-	if (heap == NULL)
-	{
-		free(coders);
-		free(dongle);
-		return (false);
-	}
-	free_heap(heap);
+	dongles = malloc(sizeof(t_dongle) * config->coders_number);
+	if (dongles == NULL)
+		return (NULL);
+	memset(dongles, 0, sizeof(t_dongle) * config->coders_number);
 	i = 0;
 	while (i < config->coders_number)
 	{
-		pthread_mutex_destroy(&dongle[i].mutex);
+		dongles[i].id = i + 1;
+		if (pthread_mutex_init(&dongles[i].mutex, NULL) != 0)
+		{
+			destroy_dongles(dongles, i);
+			return (NULL);
+		}
 		i++;
 	}
-	free(dongle);
-	free(coders);
-	return (true);
+	return (dongles);
 }

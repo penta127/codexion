@@ -1,54 +1,50 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   ft_atoi.c                                          :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: koito <koito@student.42tokyo.jp>           #+#  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/11/20 00:00:00 by koito             #+#    #+#             */
+/*   Updated: 2026/11/20 00:00:00 by koito            ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "codexion.h"
 
 bool	overflow(long out, char str, int check_minus)
 {
-	long	max_div;
-	long	max_mod;
-	long	min_div;
-	long	min_mod;
+	long	limit;
 
-	if (check_minus == 1)
-	{
-		max_div = INT_MAX / 10;
-		max_mod = INT_MAX % 10;
-		if ((out > max_div) || (out == max_div && ((int)str - '0') > max_mod))
-			return (true);
-		return (false);
-	}
-	else
-	{
-		min_div = -(INT_MIN / 10);
-		min_mod = -(INT_MIN % 10);
-		if ((out > min_div) || (out == min_div && ((int)str - '0') > min_mod))
-			return (true);
-		return (false);
-	}
-	return (false);
+	limit = INT_MAX;
+	if (check_minus == -1)
+		limit = -(long)INT_MIN;
+	return (out > limit / 10 || (out == limit / 10
+			&& str - '0' > limit % 10));
 }
 
 int	ft_atoi(const char *str)
 {
-	int	i;
-	int	check_minus;
+	int		i;
+	int		sign;
 	long	out;
 
 	i = 0;
-	check_minus = 1;
+	sign = 1;
 	out = 0;
-	while ((str[i] == ' ') || ('\t' <= str[i] && str[i] <= '\r'))
+	while (str[i] == ' ' || ('\t' <= str[i] && str[i] <= '\r'))
 		i++;
 	if (str[i] == '-' || str[i] == '+')
 	{
 		if (str[i] == '-')
-			check_minus = check_minus * -1;
+			sign = -1;
 		i++;
 	}
 	while ('0' <= str[i] && str[i] <= '9')
 	{
-		if (overflow(out, str[i], check_minus))
+		if (overflow(out, str[i], sign))
 			return (-1);
-		out = (out * 10) + str[i] - '0';
-		i++;
+		out = out * 10 + str[i++] - '0';
 	}
-	return (check_minus * out);
+	return ((int)(sign * out));
 }
