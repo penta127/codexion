@@ -122,11 +122,9 @@ int heap_pop(t_heap *heap, t_request *request)
 		left = 2 * i + 1;
 		right = 2 * i + 2;
 		smallest = i;
-		if (left < heap->size
-			&& heap->data[left].priority < heap->data[smallest].priority)
+		if (left < heap->size && heap->data[left].priority < heap->data[smallest].priority)
 			smallest = left;
-		if (right < heap->size
-			&& heap->data[right].priority < heap->data[smallest].priority)
+		if (right < heap->size && heap->data[right].priority < heap->data[smallest].priority)
 			smallest = right;
 		if (smallest == i)
 			break ;
@@ -147,11 +145,34 @@ void free_heap(t_heap *heap)
 	return;
 }
 
+t_thread *init_thread(t_heap *heap, t_dongle *dongle, t_config *config, t_coder *coders)
+{
+	t_thread *thread;
+	int i;
+
+	thread->heap = heap;
+	thread->dongle = dongle;
+
+	i = 0;
+	while(i < config->coders_number)
+	{
+		coders[i].thread = &thread;
+		i++;
+	}
+	return (thread);
+}
+
+void *routine()
+{
+
+}
+
 int simulation(t_config *config)
 {
     t_coder *coders;
     t_dongle *dongle;
 	t_heap *heap;
+	t_thread thread;
 
     coders = init_coder(config);
     if (coders == NULL)
@@ -162,11 +183,13 @@ int simulation(t_config *config)
         free(coders);
         return(-1);
     }
-	heap =init_heap(config);
+	heap = init_heap(config);
 	if (heap == NULL)
 	{
 		free(coders);
 		free(dongle);
 		return(-1);
 	}
+
+	
 }

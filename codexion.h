@@ -51,6 +51,12 @@ typedef struct s_heap
 	int capacity;
 }t_heap;
 
+typedef struct s_thread
+{
+    t_heap *heap;
+    t_dongle *dongle;
+}t_thread;
+
 //input a_1
 int error_check(int argc, char **argv);
 int number_check(char argv[], int yes_no_zero);
