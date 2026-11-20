@@ -2,14 +2,15 @@
 
 int main(int argc, char *argv[])
 {
-    int check;
+    bool valid_input;
     t_config config;
 
-    check = error_check(argc, argv);
-    if (check == -1)
+    valid_input = error_check(argc, argv);
+    if (!valid_input)
         return (1);
     input(&config, argv);
-    simulation(&config);
+    if (!simulation(&config))
+        return (1);
 
 
 

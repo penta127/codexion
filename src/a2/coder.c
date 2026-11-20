@@ -76,16 +76,16 @@ t_heap *init_heap(t_config *config)
 }
 
 
-int heap_push(t_heap *heap, t_request request)
+bool heap_push(t_heap *heap, t_request request)
 {
 	int i;
 	int parent;
 	t_request tmp;
 
 	if (heap == NULL || heap->data == NULL)
-		return (-1);
+		return (false);
 	if (heap->capacity <= heap->size)
-		return (-1);
+		return (false);
 	i = heap->size;
 	heap->data[i] = request;
 	heap->size++;
@@ -99,11 +99,11 @@ int heap_push(t_heap *heap, t_request request)
 		heap->data[i] = tmp;
 		i = parent;
 	}
-	return(0);
+	return (true);
 }
 
 
-int heap_pop(t_heap *heap, t_request *request)
+bool heap_pop(t_heap *heap, t_request *request)
 {
 	int i;
 	int left;
@@ -112,7 +112,7 @@ int heap_pop(t_heap *heap, t_request *request)
 	t_request tmp;
 
 	if (heap == NULL || heap->data == NULL || request == NULL || heap->size <= 0)
-		return (-1);
+		return (false);
 	*request = heap->data[0];
 	heap->data[0] = heap->data[heap->size - 1];
 	heap->size--;
@@ -133,7 +133,7 @@ int heap_pop(t_heap *heap, t_request *request)
 		heap->data[smallest] = tmp;
 		i = smallest;
 	}
-	return (0);
+	return (true);
 }
 
 void free_heap(t_heap *heap)
@@ -145,51 +145,37 @@ void free_heap(t_heap *heap)
 	return;
 }
 
-t_thread *init_thread(t_heap *heap, t_dongle *dongle, t_config *config, t_coder *coders)
+bool simulation(t_config *config)
 {
-	t_thread *thread;
-	int i;
-
-	thread->heap = heap;
-	thread->dongle = dongle;
-
-	i = 0;
-	while(i < config->coders_number)
-	{
-		coders[i].thread = &thread;
-		i++;
-	}
-	return (thread);
-}
-
-void *routine()
-{
-
-}
-
-int simulation(t_config *config)
-{
-    t_coder *coders;
-    t_dongle *dongle;
+	t_coder *coders;
+	t_dongle *dongle;
 	t_heap *heap;
-	t_thread thread;
+	int i;
 
     coders = init_coder(config);
     if (coders == NULL)
-        return(-1);
+        return (false);
     dongle = init_dongle(config);
     if (dongle == NULL)
     {
         free(coders);
-        return(-1);
+        return (false);
     }
 	heap = init_heap(config);
 	if (heap == NULL)
 	{
 		free(coders);
 		free(dongle);
-		return(-1);
+		return (false);
 	}
-
-	
+	free_heap(heap);
+	i = 0;
+	while (i < config->coders_number)
+	{
+		pthread_mutex_destroy(&dongle[i].mutex);
+		i++;
+	}
+	free(dongle);
+	free(coders);
+	return (true);
 }

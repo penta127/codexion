@@ -1,6 +1,6 @@
 #include "codexion.h"
 
-int	overflow(long out, char str, int check_minus)
+bool	overflow(long out, char str, int check_minus)
 {
 	long	max_div;
 	long	max_mod;
@@ -12,18 +12,18 @@ int	overflow(long out, char str, int check_minus)
 		max_div = INT_MAX / 10;
 		max_mod = INT_MAX % 10;
 		if ((out > max_div) || (out == max_div && ((int)str - '0') > max_mod))
-			return (-1);
-		return (0);
+			return (true);
+		return (false);
 	}
 	else
 	{
 		min_div = -(INT_MIN / 10);
 		min_mod = -(INT_MIN % 10);
 		if ((out > min_div) || (out == min_div && ((int)str - '0') > min_mod))
-			return (-1);
-		return (0);
+			return (true);
+		return (false);
 	}
-	return (0);
+	return (false);
 }
 
 int	ft_atoi(const char *str)
@@ -45,7 +45,7 @@ int	ft_atoi(const char *str)
 	}
 	while ('0' <= str[i] && str[i] <= '9')
 	{
-		if (overflow(out, str[i], check_minus) == -1)
+		if (overflow(out, str[i], check_minus))
 			return (-1);
 		out = (out * 10) + str[i] - '0';
 		i++;

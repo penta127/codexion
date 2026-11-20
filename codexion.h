@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <stdbool.h>
 #include <string.h>
 #include <pthread.h>
 
@@ -51,26 +52,28 @@ typedef struct s_heap
 	int capacity;
 }t_heap;
 
-typedef struct s_thread
-{
-    t_heap *heap;
-    t_dongle *dongle;
-}t_thread;
-
 //input a_1
-int error_check(int argc, char **argv);
-int number_check(char argv[], int yes_no_zero);
+bool error_check(int argc, char **argv);
+bool number_check(char argv[], int yes_no_zero);
 void input(t_config *config, char **argv);
 
 //a2
-int simulation(t_config *config);
+bool simulation(t_config *config);
 t_dongle *init_dongle(t_config *config);
 t_coder *init_coder(t_config *config);
+t_heap *init_heap(t_config *config);
+bool heap_push(t_heap *heap, t_request request);
+bool heap_pop(t_heap *heap, t_request *request);
+void free_heap(t_heap *heap);
+
+//a3
+bool finish_join_coders(t_coder *coders, t_config *config);
+bool start_coders(t_coder *coders, t_config *config);
 
 
 
 //ft_atoi
-int	overflow(long out, char str, int check_minus);
+bool	overflow(long out, char str, int check_minus);
 int	ft_atoi(const char *str);
 
 
